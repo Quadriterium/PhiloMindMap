@@ -1,0 +1,11 @@
+﻿@page "/"
+@inject NavigationManager Navigation
+
+<PageTitle>MindMap</PageTitle>
+
+@code {
+	protected override void OnInitialized()
+	{
+		Navigation.NavigateTo("/MindMap", replace: true);
+	}
+}

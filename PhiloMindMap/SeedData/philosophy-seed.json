@@ -1,0 +1,128 @@
+{
+  "philosophers": [
+    {
+      "id": 1,
+      "name": "Socrate",
+      "birthDate": "0470-01-01T00:00:00",
+      "deathDate": "0399-01-01T00:00:00",
+      "description": "Socrate est une figure fondatrice de la philosophie occidentale, centré sur l'éthique, le dialogue et l'examen critique."
+    },
+    {
+      "id": 2,
+      "name": "Platon",
+      "birthDate": "0427-01-01T00:00:00",
+      "deathDate": "0347-01-01T00:00:00",
+      "description": "Platon, disciple de Socrate, développe la théorie des Idées et fonde l'Académie."
+    },
+    {
+      "id": 3,
+      "name": "Aristote",
+      "birthDate": "0384-01-01T00:00:00",
+      "deathDate": "0322-01-01T00:00:00",
+      "description": "Aristote construit une pensée systématique en logique, métaphysique, éthique et politique."
+    },
+    {
+      "id": 4,
+      "name": "Spinoza",
+      "birthDate": "1632-11-24T00:00:00",
+      "deathDate": "1677-02-21T00:00:00",
+      "description": "Spinoza propose un monisme radical et une approche rationnelle des affects dans son Éthique."
+    },
+    {
+      "id": 5,
+      "name": "Descartes",
+      "birthDate": "1596-03-31T00:00:00",
+      "deathDate": "1650-02-11T00:00:00",
+      "description": "Descartes place le doute méthodique et la raison au cœur de la connaissance."
+    },
+    {
+      "id": 6,
+      "name": "Kant",
+      "birthDate": "1724-04-22T00:00:00",
+      "deathDate": "1804-02-12T00:00:00",
+      "description": "Kant articule les limites de la connaissance et une morale du devoir fondée sur l'autonomie."
+    },
+    {
+      "id": 7,
+      "name": "Nietzsche",
+      "birthDate": "1844-10-15T00:00:00",
+      "deathDate": "1900-08-25T00:00:00",
+      "description": "Nietzsche critique les morales traditionnelles et interroge la création de nouvelles valeurs."
+    }
+  ],
+  "layout": [
+    {
+      "data": { "id": "freewill", "label": "Libre arbitre", "dataType": "idea" },
+      "position": { "x": 120, "y": 220 }
+    },
+    {
+      "data": { "id": "determinism", "label": "Déterminisme", "dataType": "idea" },
+      "position": { "x": 330, "y": 220 }
+    },
+    {
+      "data": { "id": "ethics", "label": "Éthique", "dataType": "idea" },
+      "position": { "x": 520, "y": 120 }
+    },
+    {
+      "data": { "id": "reason", "label": "Raison", "dataType": "idea" },
+      "position": { "x": 520, "y": 320 }
+    },
+
+    {
+      "data": { "id": "socrate", "label": "Socrate", "dataType": "philosoph" },
+      "position": { "x": 40, "y": 60 }
+    },
+    {
+      "data": { "id": "platon", "label": "Platon", "dataType": "philosoph" },
+      "position": { "x": 140, "y": 60 }
+    },
+    {
+      "data": { "id": "aristote", "label": "Aristote", "dataType": "philosoph" },
+      "position": { "x": 240, "y": 60 }
+    },
+    {
+      "data": { "id": "descartes", "label": "Descartes", "dataType": "philosoph" },
+      "position": { "x": 420, "y": 420 }
+    },
+    {
+      "data": { "id": "spinoza", "label": "Spinoza", "dataType": "philosoph" },
+      "position": { "x": 220, "y": 120 }
+    },
+    {
+      "data": { "id": "kant", "label": "Kant", "dataType": "philosoph" },
+      "position": { "x": 420, "y": 220 }
+    },
+    {
+      "data": { "id": "nietzsche", "label": "Nietzsche", "dataType": "philosoph" },
+      "position": { "x": 620, "y": 220 }
+    },
+
+    {
+      "data": { "id": "freewill_spinoza", "source": "freewill", "target": "spinoza" }
+    },
+    {
+      "data": { "id": "freewill_kant", "source": "freewill", "target": "kant" }
+    },
+    {
+      "data": { "id": "freewill_nietzsche", "source": "freewill", "target": "nietzsche" }
+    },
+    {
+      "data": { "id": "determinism_spinoza", "source": "determinism", "target": "spinoza" }
+    },
+    {
+      "data": { "id": "determinism_descartes", "source": "determinism", "target": "descartes" }
+    },
+    {
+      "data": { "id": "ethics_socrate", "source": "ethics", "target": "socrate" }
+    },
+    {
+      "data": { "id": "ethics_aristote", "source": "ethics", "target": "aristote" }
+    },
+    {
+      "data": { "id": "reason_descartes", "source": "reason", "target": "descartes" }
+    },
+    {
+      "data": { "id": "reason_kant", "source": "reason", "target": "kant" }
+    }
+  ]
+}

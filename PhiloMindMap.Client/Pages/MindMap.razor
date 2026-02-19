@@ -1,0 +1,953 @@
+﻿@page "/MindMap"
+@rendermode InteractiveAuto
+
+@inject HttpClient Http
+@inject IJSRuntime JSRuntime
+
+<PageTitle>MindMap</PageTitle>
+
+<!--
+    include css
+-->
+<link rel="stylesheet" href="/css/mindmap.css" />
+
+
+<h1>MindMap</h1>
+
+@if (showContentModal)
+{
+    <div class="modal modal-overlay" style="display: block;">
+        <div class="modal-content modal-panel content-modal-content">
+            <div class="content-modal-header">
+                <button class="icon-button" title="Modifier la fiche" @onclick="OpenEditModal">✎</button>
+                <button type="button" class="close modal-close-btn" aria-label="Fermer" @onclick="CloseContentModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="content-modal-title">
+                    @((MarkupString)contentModalTitle)
+                </div>
+                <div class="content-modal-text">
+                    <div>@((MarkupString)contentModalText)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showEditModal)
+{
+    <div class="modal modal-overlay" style="display: block;">
+        <div class="modal-content modal-panel create-modal-content">
+            <div class="modal-header">
+                <h3>Modifier la fiche</h3>
+                <button type="button" class="close modal-close-btn" aria-label="Fermer" @onclick="CloseEditModal">&times;</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(editModalError))
+            {
+                <div class="create-modal-error">@editModalError</div>
+            }
+
+            <div class="create-form-grid">
+                <label>Titre (non modifiable)</label>
+                <input class="form-control" value="@StripHtml(contentModalTitle)" readonly />
+
+                <label>Description</label>
+                <textarea class="form-control" rows="8" @bind="editModalText"></textarea>
+            </div>
+
+            <div class="create-modal-actions">
+                <button class="btn btn-secondary" @onclick="CloseEditModal" disabled="@isSavingEdit">Annuler</button>
+                <button class="btn btn-primary" @onclick="SaveEditEntryAsync" disabled="@isSavingEdit">Sauvegarder</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showCreateModal)
+{
+    <div class="modal modal-overlay" style="display: block;">
+        <div class="modal-content modal-panel create-modal-content">
+            <div class="modal-header">
+                <h3>@GetCreateModalTitle()</h3>
+                <button type="button" class="close modal-close-btn" aria-label="Fermer" @onclick="CloseCreateModal">&times;</button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(createModalError))
+            {
+                <div class="create-modal-error">@createModalError</div>
+            }
+
+            @if (createMode == CreateMode.Philosopher)
+            {
+                <div class="create-form-grid">
+                    <label>Nom</label>
+                    <input class="form-control" @bind="newPhilosopherName" />
+
+                    <label>Description</label>
+                    <textarea class="form-control" rows="4" @bind="newPhilosopherDescription"></textarea>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="GeneratePhilosopherDescriptionAsync" disabled="@isGeneratingDescription">
+                        @(isGeneratingDescription ? "Génération..." : "Générer la description (IA)")
+                    </button>
+
+                    <label>Date de naissance</label>
+                    <input class="form-control" type="date" @bind="newPhilosopherBirthDate" />
+
+                    <label>Date de décès (optionnelle)</label>
+                    <input class="form-control" type="date" @bind="newPhilosopherDeathDate" />
+                </div>
+            }
+            else if (createMode == CreateMode.Idea)
+            {
+                <div class="create-form-grid">
+                    <label>Nom</label>
+                    <input class="form-control" @bind="newIdeaName" />
+
+                    <label>Description</label>
+                    <textarea class="form-control" rows="4" @bind="newIdeaDescription"></textarea>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="GenerateIdeaDescriptionAsync" disabled="@isGeneratingDescription">
+                        @(isGeneratingDescription ? "Génération..." : "Générer la description (IA)")
+                    </button>
+                </div>
+            }
+            else if (createMode == CreateMode.Link)
+            {
+                <div class="create-form-grid">
+                    <label>Philosophe</label>
+                    <select class="form-control" @bind="selectedPhilosopherId">
+                        <option value="">Sélectionner un philosophe</option>
+                        @foreach (var philosopher in philosophersForLink)
+                        {
+                            <option value="@philosopher.Id">@philosopher.Name</option>
+                        }
+                    </select>
+
+                    <label>Idée</label>
+                    <select class="form-control" @bind="selectedIdeaId">
+                        <option value="">Sélectionner une idée</option>
+                        @foreach (var idea in ideasForLink)
+                        {
+                            <option value="@idea.Id">@idea.Name</option>
+                        }
+                    </select>
+
+                    <label>Description / type de relation (optionnel)</label>
+                    <textarea class="form-control" rows="3" @bind="newLinkRelationType"></textarea>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="GenerateLinkDescriptionAsync" disabled="@isGeneratingDescription">
+                        @(isGeneratingDescription ? "Génération..." : "Générer la description (IA)")
+                    </button>
+                </div>
+            }
+
+            <div class="create-modal-actions">
+                <button class="btn btn-secondary" @onclick="CloseCreateModal" disabled="@isSavingCreate">Annuler</button>
+                <button class="btn btn-primary" @onclick="SaveCreateEntryAsync" disabled="@isSavingCreate">Sauvegarder</button>
+            </div>
+        </div>
+    </div>
+}
+
+<div id="cy" style="width: 100%; height: 800px;"></div>
+
+<p role="status"></p>
+
+
+
+
+@code {
+
+    private bool showContentModal;
+    private string contentModalText = "";
+    private string contentModalTitle = "";
+    private string currentContentKey = string.Empty;
+
+    private bool showEditModal;
+    private bool isSavingEdit;
+    private string editModalError = string.Empty;
+    private string editModalText = string.Empty;
+
+    private bool showCreateModal;
+    private bool isSavingCreate;
+    private bool isGeneratingDescription;
+    private string createModalError = string.Empty;
+    private CreateMode createMode = CreateMode.None;
+
+    private string newPhilosopherName = string.Empty;
+    private string newPhilosopherDescription = string.Empty;
+    private DateTime newPhilosopherBirthDate = DateTime.Today;
+    private DateTime? newPhilosopherDeathDate;
+
+    private string newIdeaName = string.Empty;
+    private string newIdeaDescription = string.Empty;
+
+    private long? selectedPhilosopherId;
+    private long? selectedIdeaId;
+    private string newLinkRelationType = string.Empty;
+
+    private List<SimplePhilosopherDto> philosophersForLink = new();
+    private List<SimpleIdeaDto> ideasForLink = new();
+
+    private double? pendingCreatePositionX;
+    private double? pendingCreatePositionY;
+
+    private void CloseContentModal()
+    {
+        showContentModal = false;
+    }
+
+    [JSInvokableAttribute("OpenModal")]
+    public async Task OpenModal(string text, string? elementType = null, string? sourceId = null, string? targetId = null)
+    {
+        var nodeKey = text ?? string.Empty;
+        currentContentKey = nodeKey;
+        var content = await TryGetMindMapContentAsync(nodeKey);
+
+        var philosophers = await Http.GetFromJsonAsync<List<PhilosopherDto>>("https://localhost:17011/api/philosopher")
+                          ?? new List<PhilosopherDto>();
+        var ideas = await Http.GetFromJsonAsync<List<SimpleIdeaDto>>("https://localhost:17011/api/philosopher/ideas")
+                    ?? new List<SimpleIdeaDto>();
+
+        var philosopher = philosophers.FirstOrDefault(p => BuildSlug(p.Name) == nodeKey);
+        var isEdge = string.Equals(elementType, "edge", StringComparison.OrdinalIgnoreCase);
+
+        if (isEdge)
+        {
+            var philosopherName = philosophers.FirstOrDefault(p => BuildSlug(p.Name) == BuildSlug(targetId))?.Name;
+            var ideaName = ideas.FirstOrDefault(i => BuildSlug(i.Name) == BuildSlug(sourceId))?.Name;
+
+            if (!string.IsNullOrWhiteSpace(philosopherName) && !string.IsNullOrWhiteSpace(ideaName))
+            {
+                contentModalTitle = $"Lien entre {philosopherName} et {ideaName}";
+            }
+            else
+            {
+                contentModalTitle = "Lien";
+            }
+        }
+        else
+        {
+            contentModalTitle = !string.IsNullOrWhiteSpace(content?.Title)
+                ? content!.Title
+                : philosopher?.Name ?? BuildDisplayName(nodeKey);
+        }
+
+        contentModalText = content?.HtmlContent ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(contentModalText) && philosopher is not null)
+        {
+            contentModalText = await GetWikipediaContentAsync(philosopher.Name);
+
+            if (string.IsNullOrWhiteSpace(contentModalText) && !string.IsNullOrWhiteSpace(philosopher.Description))
+            {
+                contentModalText = $"<p>{System.Net.WebUtility.HtmlEncode(philosopher.Description)}</p>";
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(contentModalText))
+        {
+            contentModalText = "<p>Aucun contenu disponible.</p>";
+        }
+
+        showContentModal = true;
+        StateHasChanged();
+    }
+
+    private void OpenEditModal()
+    {
+        if (string.IsNullOrWhiteSpace(currentContentKey))
+        {
+            return;
+        }
+
+        editModalError = string.Empty;
+        editModalText = HtmlToEditableText(contentModalText);
+        showEditModal = true;
+    }
+
+    private void CloseEditModal()
+    {
+        showEditModal = false;
+        editModalError = string.Empty;
+    }
+
+    [JSInvokable("OpenCreateModal")]
+    public async Task OpenCreateModal(string type, double x, double y)
+    {
+        createModalError = string.Empty;
+        pendingCreatePositionX = x;
+        pendingCreatePositionY = y;
+
+        createMode = type?.Trim().ToLowerInvariant() switch
+        {
+            "philosopher" => CreateMode.Philosopher,
+            "idea" => CreateMode.Idea,
+            "link" => CreateMode.Link,
+            _ => CreateMode.None
+        };
+
+        if (createMode == CreateMode.None)
+        {
+            return;
+        }
+
+        ResetCreateForm();
+
+        if (createMode == CreateMode.Link)
+        {
+            await LoadLinkDataAsync();
+        }
+
+        showCreateModal = true;
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var dotNetReference = DotNetObjectReference.Create(this);
+            var layout = await Http.GetStringAsync("https://localhost:17011/api/philosopher/layout");
+            await JSRuntime.InvokeVoidAsync("initializeCytoscape", dotNetReference, layout);
+        }
+    }
+    [JSInvokable("GetText")]
+    public static string GetText(string id)
+    {
+        return $"Hello from C# with id {id}";        
+    }
+
+    [JSInvokable("SaveNodePosition")]
+    public async Task SaveNodePosition(string nodeId, double x, double y, string dataType)
+    {
+        if (string.IsNullOrWhiteSpace(nodeId))
+        {
+            return;
+        }
+
+        try
+        {
+            await Http.PutAsJsonAsync(
+                "https://localhost:17011/api/philosopher/layout/node-position",
+                new SaveNodePositionRequestDto
+                {
+                    NodeId = nodeId,
+                    DataType = dataType,
+                    X = x,
+                    Y = y
+                });
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task SaveCreateEntryAsync()
+    {
+        createModalError = string.Empty;
+        isSavingCreate = true;
+
+        try
+        {
+            switch (createMode)
+            {
+                case CreateMode.Philosopher:
+                    await SavePhilosopherAsync();
+                    break;
+                case CreateMode.Idea:
+                    await SaveIdeaAsync();
+                    break;
+                case CreateMode.Link:
+                    await SaveLinkAsync();
+                    break;
+                default:
+                    createModalError = "Type de création invalide.";
+                    return;
+            }
+
+            CloseCreateModal();
+        }
+        catch (Exception ex)
+        {
+            createModalError = ex.Message;
+        }
+        finally
+        {
+            isSavingCreate = false;
+        }
+    }
+
+    private async Task SaveEditEntryAsync()
+    {
+        if (string.IsNullOrWhiteSpace(currentContentKey))
+        {
+            editModalError = "Impossible d'identifier la fiche à modifier.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(editModalText))
+        {
+            editModalError = "La description ne peut pas être vide.";
+            return;
+        }
+
+        editModalError = string.Empty;
+        isSavingEdit = true;
+
+        try
+        {
+            var response = await Http.PutAsJsonAsync("https://localhost:17011/api/philosopher/content", new UpdateContentRequestDto
+            {
+                Id = currentContentKey,
+                HtmlContent = EditableTextToHtml(editModalText)
+            });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var details = await response.Content.ReadAsStringAsync();
+                throw new InvalidOperationException(string.IsNullOrWhiteSpace(details)
+                    ? "Impossible de mettre à jour la fiche."
+                    : details);
+            }
+
+            var updated = await response.Content.ReadFromJsonAsync<MindMapContentDto>();
+            if (updated is not null)
+            {
+                contentModalTitle = updated.Title;
+                contentModalText = updated.HtmlContent;
+            }
+            else
+            {
+                contentModalText = EditableTextToHtml(editModalText);
+            }
+
+            CloseEditModal();
+        }
+        catch (Exception ex)
+        {
+            editModalError = ex.Message;
+        }
+        finally
+        {
+            isSavingEdit = false;
+        }
+    }
+
+    private async Task SavePhilosopherAsync()
+    {
+        if (string.IsNullOrWhiteSpace(newPhilosopherName))
+        {
+            throw new InvalidOperationException("Le nom du philosophe est requis.");
+        }
+
+        var response = await Http.PostAsJsonAsync("https://localhost:17011/api/philosopher", new CreatePhilosopherRequestDto
+        {
+            Name = newPhilosopherName.Trim(),
+            Description = string.IsNullOrWhiteSpace(newPhilosopherDescription) ? null : newPhilosopherDescription.Trim(),
+            BirthDate = newPhilosopherBirthDate,
+            DeathDate = newPhilosopherDeathDate
+        });
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var details = await response.Content.ReadAsStringAsync();
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(details)
+                ? "Impossible d'ajouter le philosophe."
+                : details);
+        }
+
+        var created = await response.Content.ReadFromJsonAsync<SimplePhilosopherDto>();
+        if (!string.IsNullOrWhiteSpace(created?.Name) && pendingCreatePositionX.HasValue && pendingCreatePositionY.HasValue)
+        {
+            var nodeId = BuildSlug(created.Name);
+            await SaveNodePosition(nodeId, pendingCreatePositionX.Value, pendingCreatePositionY.Value, "philosoph");
+            await AddPhilosopherNodeAsync(nodeId, created.Name, pendingCreatePositionX.Value, pendingCreatePositionY.Value);
+        }
+    }
+
+    private async Task SaveIdeaAsync()
+    {
+        if (string.IsNullOrWhiteSpace(newIdeaName))
+        {
+            throw new InvalidOperationException("Le nom de l'idée est requis.");
+        }
+
+        var response = await Http.PostAsJsonAsync("https://localhost:17011/api/philosopher/ideas", new CreateIdeaRequestDto
+        {
+            Name = newIdeaName.Trim(),
+            Description = string.IsNullOrWhiteSpace(newIdeaDescription) ? null : newIdeaDescription.Trim()
+        });
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var details = await response.Content.ReadAsStringAsync();
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(details)
+                ? "Impossible d'ajouter l'idée."
+                : details);
+        }
+
+        var created = await response.Content.ReadFromJsonAsync<SimpleIdeaDto>();
+        if (!string.IsNullOrWhiteSpace(created?.Name) && pendingCreatePositionX.HasValue && pendingCreatePositionY.HasValue)
+        {
+            var nodeId = BuildSlug(created.Name);
+            await SaveNodePosition(nodeId, pendingCreatePositionX.Value, pendingCreatePositionY.Value, "idea");
+            await AddIdeaNodeAsync(nodeId, created.Name, pendingCreatePositionX.Value, pendingCreatePositionY.Value);
+        }
+    }
+
+    private async Task SaveLinkAsync()
+    {
+        if (!selectedPhilosopherId.HasValue || !selectedIdeaId.HasValue)
+        {
+            throw new InvalidOperationException("Le philosophe et l'idée sont requis.");
+        }
+
+        var response = await Http.PostAsJsonAsync("https://localhost:17011/api/philosopher/links", new CreateLinkRequestDto
+        {
+            PhilosopherId = selectedPhilosopherId.Value,
+            IdeaId = selectedIdeaId.Value,
+            RelationType = string.IsNullOrWhiteSpace(newLinkRelationType) ? null : newLinkRelationType.Trim()
+        });
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var details = await response.Content.ReadAsStringAsync();
+            throw new InvalidOperationException(string.IsNullOrWhiteSpace(details)
+                ? "Impossible d'ajouter le lien."
+                : details);
+        }
+
+        var philosopherName = philosophersForLink.FirstOrDefault(p => p.Id == selectedPhilosopherId)?.Name;
+        var ideaName = ideasForLink.FirstOrDefault(i => i.Id == selectedIdeaId)?.Name;
+
+        if (!string.IsNullOrWhiteSpace(philosopherName) && !string.IsNullOrWhiteSpace(ideaName))
+        {
+            await AddLinkEdgeAsync(BuildSlug(ideaName), BuildSlug(philosopherName));
+        }
+    }
+
+    private async Task ReloadLayoutAsync()
+    {
+        var layout = await Http.GetStringAsync("https://localhost:17011/api/philosopher/layout");
+        await JSRuntime.InvokeVoidAsync("reloadMindMap", layout);
+    }
+
+    private async Task AddPhilosopherNodeAsync(string nodeId, string label, double x, double y)
+    {
+        var nodeData = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            group = "nodes",
+            data = new
+            {
+                id = nodeId,
+                label,
+                dataType = "philosoph",
+                imageUrl = "/images/philosophe.jpg"
+            },
+            position = new { x, y }
+        });
+
+        await JSRuntime.InvokeVoidAsync("addNodeToMindMap", nodeData);
+    }
+
+    private async Task AddIdeaNodeAsync(string nodeId, string label, double x, double y)
+    {
+        var nodeData = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            group = "nodes",
+            data = new
+            {
+                id = nodeId,
+                label,
+                dataType = "idea"
+            },
+            position = new { x, y }
+        });
+
+        await JSRuntime.InvokeVoidAsync("addNodeToMindMap", nodeData);
+    }
+
+    private async Task AddLinkEdgeAsync(string sourceId, string targetId)
+    {
+        var edgeId = $"{sourceId}-{targetId}";
+        var edgeData = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            group = "edges",
+            data = new
+            {
+                id = edgeId,
+                source = sourceId,
+                target = targetId
+            }
+        });
+
+        await JSRuntime.InvokeVoidAsync("addEdgeToMindMap", edgeData);
+    }
+
+    private async Task GeneratePhilosopherDescriptionAsync()
+    {
+        if (string.IsNullOrWhiteSpace(newPhilosopherName))
+        {
+            createModalError = "Saisissez le nom du philosophe avant de générer une description.";
+            return;
+        }
+
+        var birthDate = newPhilosopherBirthDate.ToString("yyyy-MM-dd");
+        var deathDate = newPhilosopherDeathDate?.ToString("yyyy-MM-dd") ?? "inconnue";
+
+        var prompt = $"Rédige une description concise (3 à 5 phrases) en français pour le philosophe '{newPhilosopherName}'. " +
+                     $"Date de naissance: {birthDate}. Date de décès: {deathDate}. " +
+                     "Style neutre, factuel, sans markdown.";
+
+        var generated = await GenerateDescriptionAsync(prompt);
+        if (!string.IsNullOrWhiteSpace(generated))
+        {
+            newPhilosopherDescription = generated;
+        }
+    }
+
+    private async Task GenerateIdeaDescriptionAsync()
+    {
+        if (string.IsNullOrWhiteSpace(newIdeaName))
+        {
+            createModalError = "Saisissez le nom de l'idée avant de générer une description.";
+            return;
+        }
+
+        var prompt = $"Rédige une description concise (3 à 5 phrases) en français pour l'idée philosophique '{newIdeaName}'. " +
+                     "Style clair, pédagogique et sans markdown.";
+
+        var generated = await GenerateDescriptionAsync(prompt);
+        if (!string.IsNullOrWhiteSpace(generated))
+        {
+            newIdeaDescription = generated;
+        }
+    }
+
+    private async Task GenerateLinkDescriptionAsync()
+    {
+        var philosopherName = philosophersForLink.FirstOrDefault(p => p.Id == selectedPhilosopherId)?.Name;
+        var ideaName = ideasForLink.FirstOrDefault(i => i.Id == selectedIdeaId)?.Name;
+
+        if (string.IsNullOrWhiteSpace(philosopherName) || string.IsNullOrWhiteSpace(ideaName))
+        {
+            createModalError = "Sélectionnez un philosophe et une idée avant de générer la description du lien.";
+            return;
+        }
+
+        var prompt = $"Rédige une courte description en français du lien entre le philosophe '{philosopherName}' et l'idée '{ideaName}'. " +
+                     "Maximum 2 phrases, factuel, sans markdown.";
+
+        var generated = await GenerateDescriptionAsync(prompt);
+        if (!string.IsNullOrWhiteSpace(generated))
+        {
+            newLinkRelationType = generated;
+        }
+    }
+
+    private async Task<string> GenerateDescriptionAsync(string prompt)
+    {
+        if (isGeneratingDescription)
+        {
+            return string.Empty;
+        }
+
+        createModalError = string.Empty;
+        isGeneratingDescription = true;
+
+        try
+        {
+            var generated = await JSRuntime.InvokeAsync<string>(
+                "generateDescriptionWithLlmApi",
+                prompt,
+                "deepseek-r1:1.5b");
+
+            if (string.IsNullOrWhiteSpace(generated))
+            {
+                throw new InvalidOperationException("Aucune description n'a été générée.");
+            }
+
+            return generated.Trim();
+        }
+        catch (Exception ex)
+        {
+            createModalError = $"Échec de la génération IA: {ex.Message}";
+            return string.Empty;
+        }
+        finally
+        {
+            isGeneratingDescription = false;
+        }
+    }
+
+    private async Task LoadLinkDataAsync()
+    {
+        philosophersForLink = await Http.GetFromJsonAsync<List<SimplePhilosopherDto>>("https://localhost:17011/api/philosopher") ?? new();
+        ideasForLink = await Http.GetFromJsonAsync<List<SimpleIdeaDto>>("https://localhost:17011/api/philosopher/ideas") ?? new();
+    }
+
+    private void CloseCreateModal()
+    {
+        showCreateModal = false;
+        createModalError = string.Empty;
+        createMode = CreateMode.None;
+        pendingCreatePositionX = null;
+        pendingCreatePositionY = null;
+    }
+
+    private void ResetCreateForm()
+    {
+        newPhilosopherName = string.Empty;
+        newPhilosopherDescription = string.Empty;
+        newPhilosopherBirthDate = DateTime.Today;
+        newPhilosopherDeathDate = null;
+
+        newIdeaName = string.Empty;
+        newIdeaDescription = string.Empty;
+
+        selectedPhilosopherId = null;
+        selectedIdeaId = null;
+        newLinkRelationType = string.Empty;
+    }
+
+    private string GetCreateModalTitle()
+    {
+        return createMode switch
+        {
+            CreateMode.Philosopher => "Ajouter un philosophe",
+            CreateMode.Idea => "Ajouter une idée",
+            CreateMode.Link => "Ajouter un lien idée-philosophe",
+            _ => "Ajouter"
+        };
+    }
+
+    private async Task<MindMapContentDto?> TryGetMindMapContentAsync(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return null;
+        }
+
+        try
+        {
+            var response = await Http.GetAsync($"https://localhost:17011/api/philosopher/content?id={Uri.EscapeDataString(id)}");
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            return await response.Content.ReadFromJsonAsync<MindMapContentDto>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<string> GetWikipediaContentAsync(string philosopherName)
+    {
+        if (string.IsNullOrWhiteSpace(philosopherName))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var url = $"https://localhost:17011/api/philosopher/wikipedia-summary?name={Uri.EscapeDataString(philosopherName)}";
+            var wiki = await Http.GetFromJsonAsync<WikipediaSummaryDto>(url);
+
+            if (wiki is null || string.IsNullOrWhiteSpace(wiki.Summary))
+            {
+                return string.Empty;
+            }
+
+            var summary = System.Net.WebUtility.HtmlEncode(wiki.Summary).Replace("\n", "<br />");
+            var sourceLink = !string.IsNullOrWhiteSpace(wiki.Url)
+                ? $"<p><a href=\"{wiki.Url}\" target=\"_blank\" rel=\"noopener noreferrer\">Source Wikipédia</a></p>"
+                : string.Empty;
+
+            return $"<p>{summary}</p>{sourceLink}";
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static string BuildDisplayName(string id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return string.Empty;
+        }
+
+        var chunks = id.Replace('-', ' ').Replace('_', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return string.Join(" ", chunks.Select(chunk => char.ToUpperInvariant(chunk[0]) + chunk[1..]));
+    }
+
+    private static string BuildSlug(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var normalized = value.Normalize(System.Text.NormalizationForm.FormD);
+        var builder = new System.Text.StringBuilder(normalized.Length);
+
+        foreach (var c in normalized)
+        {
+            var category = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c);
+            if (category == System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            if (char.IsLetterOrDigit(c))
+            {
+                builder.Append(char.ToLowerInvariant(c));
+            }
+            else if (char.IsWhiteSpace(c) || c == '-' || c == '_')
+            {
+                builder.Append('_');
+            }
+        }
+
+        return builder.ToString().Trim('_');
+    }
+
+    private static string EditableTextToHtml(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var normalized = text.Replace("\r\n", "\n").Trim();
+        var encoded = System.Net.WebUtility.HtmlEncode(normalized)
+            .Replace("\n", "<br />");
+
+        return $"<p>{encoded}</p>";
+    }
+
+    private static string HtmlToEditableText(string? html)
+    {
+        if (string.IsNullOrWhiteSpace(html))
+        {
+            return string.Empty;
+        }
+
+        var withBreaks = html
+            .Replace("<br />", "\n", StringComparison.OrdinalIgnoreCase)
+            .Replace("<br/>", "\n", StringComparison.OrdinalIgnoreCase)
+            .Replace("<br>", "\n", StringComparison.OrdinalIgnoreCase)
+            .Replace("</p>", "\n\n", StringComparison.OrdinalIgnoreCase)
+            .Replace("</div>", "\n", StringComparison.OrdinalIgnoreCase);
+
+        var withoutTags = System.Text.RegularExpressions.Regex.Replace(withBreaks, "<.*?>", string.Empty);
+        return System.Net.WebUtility.HtmlDecode(withoutTags).Trim();
+    }
+
+    private static string StripHtml(string? html)
+    {
+        if (string.IsNullOrWhiteSpace(html))
+        {
+            return string.Empty;
+        }
+
+        var withoutTags = System.Text.RegularExpressions.Regex.Replace(html, "<.*?>", string.Empty);
+        return System.Net.WebUtility.HtmlDecode(withoutTags).Trim();
+    }
+
+    private sealed class PhilosopherDto
+    {
+        public string Name { get; set; } = string.Empty;
+
+        public string Description { get; set; } = string.Empty;
+    }
+
+    private sealed class WikipediaSummaryDto
+    {
+        public string Summary { get; set; } = string.Empty;
+
+        public string? Url { get; set; }
+    }
+
+    private sealed class MindMapContentDto
+    {
+        public string ContentKey { get; set; } = string.Empty;
+
+        public string Title { get; set; } = string.Empty;
+
+        public string HtmlContent { get; set; } = string.Empty;
+    }
+
+    private sealed class SaveNodePositionRequestDto
+    {
+        public string NodeId { get; set; } = string.Empty;
+
+        public string? DataType { get; set; }
+
+        public double X { get; set; }
+
+        public double Y { get; set; }
+    }
+
+    private sealed class UpdateContentRequestDto
+    {
+        public string Id { get; set; } = string.Empty;
+
+        public string? HtmlContent { get; set; }
+    }
+
+    private sealed class CreatePhilosopherRequestDto
+    {
+        public string Name { get; set; } = string.Empty;
+
+        public string? Description { get; set; }
+
+        public DateTime BirthDate { get; set; }
+
+        public DateTime? DeathDate { get; set; }
+    }
+
+    private sealed class CreateIdeaRequestDto
+    {
+        public string Name { get; set; } = string.Empty;
+
+        public string? Description { get; set; }
+    }
+
+    private sealed class CreateLinkRequestDto
+    {
+        public long PhilosopherId { get; set; }
+
+        public long IdeaId { get; set; }
+
+        public string? RelationType { get; set; }
+    }
+
+    private sealed class SimplePhilosopherDto
+    {
+        public long Id { get; set; }
+
+        public string Name { get; set; } = string.Empty;
+
+        public string Description { get; set; } = string.Empty;
+    }
+
+    private sealed class SimpleIdeaDto
+    {
+        public long Id { get; set; }
+
+        public string Name { get; set; } = string.Empty;
+    }
+
+    private enum CreateMode
+    {
+        None,
+        Philosopher,
+        Idea,
+        Link
+    }
+
+}
